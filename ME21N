@@ -1,0 +1,758 @@
+   Option Explicit
+   Option Private Module
+   
+   #If VBA7 Then
+        Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As LongPtr)
+        Private Declare PtrSafe Function SetForegroundWindow Lib "user32.dll" (ByVal hWnd As Long) As Long
+   #Else
+        Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
+        Private Declare Function SetForegroundWindow Lib "user32.dll" (ByVal hWnd As Long) As Long
+   #End If
+
+    Dim oSapGuiAuto, oGuiApplication As Object
+    Dim oConnection As Object
+    Dim Session As Object
+    Dim lFirstDataRow As Long, lDataRow As Long, lLastDataRow As Long, lLastDataColumn As Long
+    Dim A As String, B As String, C As String, D As String, E As String
+    Dim F As String, G As String, H As String, I As String, J As String
+    Dim K As String, L As String, M As String, N As String, O As String
+    Dim P As String, Q As String, R As String, S As String, T As String
+    Dim U As String, V As String, W As String, X As String, Y As String
+    Dim Z As String
+    Dim item As Integer
+    Dim sError As String, sErrorPopUp As String
+    Private sMessage As String
+    Private sContinue
+    Public bBerhenti As Boolean
+    Public ME21N_run As Boolean
+    Public plantColumn, slocColumn, purch_reqColumn, purch_req_itmColumn, PO_quantityColumn, net_priceColumn, perColumn, unitColumn, deliv_dateColumn, item_catColumn, contractColumn, contract_itemColumn As String
+    
+Sub PlayBack_The_Script(ByVal control As IRibbonControl)
+    Activate_Scripting
+    Prepare_spreadsheet "SAP_DATA", 2
+    
+    Application.WindowState = xlMinimized 'Shrink Excel and move it out of the way
+    Application.DisplayAlerts = False 'matikan pop up notifikasi dari excel
+    Session.findById("wnd[0]").Maximize
+    frmProgress.Show
+    
+    ME21N_run = False
+    For lDataRow = lDataRow To lLastDataRow
+        SAP_ME21N (0)
+        frmProgress.progress_indicator_update ((lDataRow - lFirstDataRow + 1) / (lLastDataRow - lFirstDataRow + 1))
+        If bBerhenti = True Then lDataRow = frmProgress.Stop_Macro(lFirstDataRow, lDataRow, lLastDataRow)
+    Next lDataRow
+
+    SAP_Close 'tutup SAP window yang dipakai untuk script
+    frmProgress.Hide 'sembunyikan form progress
+    Unload frmProgress 'matikan form progress
+    Application.WindowState = xlMaximized 'maximize excel window
+    Application.DisplayAlerts = True 'nyalakan pop up notifikasi dari excel
+    sContinue = MsgBox("Selesai. Mau log off dari SAP?", vbYesNo + vbQuestion, "Konfirmasi")
+    If sContinue = vbYes Then Session.SendCommand ("/nex") 'log off dari SAP
+    
+    Clean_Up 'Bersih-bersih
+End Sub
+
+Private Sub SAP_ME21N(PosisiLog As Integer)
+'called from the main sub
+Dim header_btn As String
+Dim order_type, vendor As String
+Dim purch_org, purch_grp, company_code, payt_terms, curr, incoterms1, incoterms2, your_ref, our_ref, sarbox, header_text As String
+Dim hdr_tab As String
+Dim hdr_tab_delivery_invoice, hdr_tab_communication, hdr_tab_org_data, hdr_tab_customer_data, hdr_tab_texts As String
+Dim items_btn, item_details_btn As String
+Dim item_table As String
+Dim item As String
+Dim scrollPos As Integer
+Dim baris As Integer
+Dim item_kolom As Integer
+Dim plant, sloc, purch_req, purch_req_itm, PO_quantity, net_price, per, unit, deliv_date, item_cat, contract, contract_item As String
+Dim itm_tab, itm_tab_invoice, itm_tab_delivery, itm_tab_customer_data, itm_tab_texts, itm_tab_delivery_sch, itm_tab_services, itm_tab_conditions As String
+Dim tax_code, pl_deliv_time, conc_cat, harm_code, item_text, amount, crcy As String
+Dim baca As Boolean
+
+header_btn = "subSUB0:SAPLMEGUI:0016/subSUB1:SAPLMEVIEWS:1100/subSUB1:SAPLMEVIEWS:4000/btnDYN_4000-BUTTON"
+order_type = "subSUB0:SAPLMEGUI:0013/subSUB0:SAPLMEGUI:0030/subSUB1:SAPLMEGUI:1105/cmbMEPO_TOPLINE-BSART"
+vendor = "subSUB0:SAPLMEGUI:0013/subSUB0:SAPLMEGUI:0030/subSUB1:SAPLMEGUI:1105/ctxtMEPO_TOPLINE-SUPERFIELD"
+purch_org = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT9/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1221/ctxtMEPO1222-EKORG"
+purch_grp = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT9/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1221/ctxtMEPO1222-EKGRP"
+company_code = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT9/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1221/ctxtMEPO1222-BUKRS"
+payt_terms = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT1/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1226/ctxtMEPO1226-ZTERM"
+curr = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT1/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1226/ctxtMEPO1226-WAERS"
+incoterms1 = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT1/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1226/ctxtMEPO1226-INCO1"
+incoterms2 = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT1/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1226/txtMEPO1226-INCO2"
+your_ref = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT5/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1225/txtMEPOCOMM-IHREZ"
+our_ref = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT5/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1225/txtMEPOCOMM-UNSEZ"
+header_text = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT3/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1230/subTEXTS:SAPLMMTE:0100/subEDITOR:SAPLMMTE:0101/cntlTEXT_EDITOR_0101/shellcont/shell"
+hdr_tab = "subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/"
+hdr_tab_delivery_invoice = "tabpTABHDT1"
+hdr_tab_communication = "tabpTABHDT5"
+hdr_tab_org_data = "tabpTABHDT9"
+hdr_tab_customer_data = "tabpTABHDT11"
+hdr_tab_texts = "tabpTABHDT3"
+
+On Error GoTo errHandler1
+Read_Spreadsheet ("SAP_DATA")
+baca = True
+sError = ""
+
+Session.findById("wnd[0]/tbar[0]/okcd").Text = "/nme21n" ' Masukkan t-code
+Session.findById("wnd[0]").sendVKey 0   ' tekan Enter
+If Not Session.findById("wnd[0]/usr/" & header_btn, False) Is Nothing Then 'jika header masih tertutup
+     Session.findById("wnd[0]/usr/" & header_btn).press 'tekan header button
+End If
+Session.findById("wnd[0]/usr/" & order_type).Key = C 'doc type
+Session.findById("wnd[0]/usr/" & vendor).Text = B  'vendor
+Session.findById("wnd[0]").sendVKey 0   ' tekan Enter
+
+Session.findById("wnd[0]/usr/" & hdr_tab & hdr_tab_delivery_invoice).Select 'tekan tab delivery/invoice
+Session.findById("wnd[0]/usr/" & payt_terms).Text = H  'payment terms
+Session.findById("wnd[0]/usr/" & curr).Text = I  'currency
+Session.findById("wnd[0]/usr/" & incoterms1).Text = J  'incoterms1
+Session.findById("wnd[0]/usr/" & incoterms2).Text = K   'incoterms2
+
+Session.findById("wnd[0]/usr/" & hdr_tab & hdr_tab_org_data).Select 'tekan tab org. data
+Session.findById("wnd[0]/usr/" & purch_org).Text = D  'purch org
+Session.findById("wnd[0]/usr/" & purch_grp).Text = E  'purch group
+Session.findById("wnd[0]/usr/" & company_code).Text = "1550"  'company code
+
+Session.findById("wnd[0]/usr/" & hdr_tab & hdr_tab_communication).Select 'tekan tab communication
+Session.findById("wnd[0]/usr/" & your_ref).Text = N   'your reference
+Session.findById("wnd[0]/usr/" & our_ref).Text = O   'our reference
+If Y <> "" Then 'jika Header Text terisi
+    Session.findById("wnd[0]/usr/" & hdr_tab & hdr_tab_texts).Select 'tekan tab texts
+    Session.findById("wnd[0]/usr/" & header_text).Text = Y   'header text
+End If
+
+Session.findById("wnd[0]").sendVKey 0   ' tekan Enter
+If Session.findById("wnd[0]/sbar").MessageType = "E" Then Err.Raise 65535  'jika error pergi ke ErrorHandler
+
+Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0013/subSUB1:SAPLMEVIEWS:1100/subSUB1:SAPLMEVIEWS:4000/btnDYN_4000-BUTTON").press 'tutup header
+
+items_btn = "subSUB0:SAPLMEGUI:0016/subSUB2:SAPLMEVIEWS:1100/subSUB1:SAPLMEVIEWS:4001/btnDYN_4000-BUTTON"
+item_details_btn = "subSUB0:SAPLMEGUI:0016/subSUB3:SAPLMEVIEWS:1100/subSUB1:SAPLMEVIEWS:4002/btnDYN_4000-BUTTON"
+If Session.findById("wnd[0]/usr/" & items_btn).ToolTip = "Expand Items Ctrl+F3" Then 'jika items tertutup
+    Session.findById("wnd[0]/usr/" & items_btn).press 'tekan items button
+End If
+If Session.findById("wnd[0]/usr/" & item_details_btn).ToolTip = "Expand Item Details Ctrl+F4" Then 'jika item details tertutup
+    Session.findById("wnd[0]/usr/" & item_details_btn).press 'tekan item details button
+End If
+
+item_table = "wnd[0]/usr/subSUB0:SAPLMEGUI:0016/subSUB2:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1211/tblSAPLMEGUITC_1211/"
+item = "txtMEPO1211-EBELP"
+
+If ME21N_run = False Then
+    For item_kolom = 1 To 44
+        If Not Session.findById(item_table & "ctxtMEPO1211-NAME1[" & item_kolom & ",0]", False) Is Nothing Then
+            plantColumn = "ctxtMEPO1211-NAME1[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "ctxtMEPO1211-LGOBE[" & item_kolom & ",0]", False) Is Nothing Then
+            slocColumn = "ctxtMEPO1211-LGOBE[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "ctxtMEPO1211-BANFN[" & item_kolom & ",0]", False) Is Nothing Then
+            purch_reqColumn = "ctxtMEPO1211-BANFN[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "txtMEPO1211-BNFPO[" & item_kolom & ",0]", False) Is Nothing Then
+            purch_req_itmColumn = "txtMEPO1211-BNFPO[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "txtMEPO1211-MENGE[" & item_kolom & ",0]", False) Is Nothing Then
+            PO_quantityColumn = "txtMEPO1211-MENGE[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "txtMEPO1211-NETPR[" & item_kolom & ",0]", False) Is Nothing Then
+            net_priceColumn = "txtMEPO1211-NETPR[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "txtMEPO1211-PEINH[" & item_kolom & ",0]", False) Is Nothing Then
+            perColumn = "txtMEPO1211-PEINH[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "ctxtMEPO1211-MEINS[" & item_kolom & ",0]", False) Is Nothing Then
+            unitColumn = "ctxtMEPO1211-MEINS[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "ctxtMEPO1211-EEIND[" & item_kolom & ",0]", False) Is Nothing Then
+            deliv_dateColumn = "ctxtMEPO1211-EEIND[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "ctxtMEPO1211-EPSTP[" & item_kolom & ",0]", False) Is Nothing Then
+            item_catColumn = "ctxtMEPO1211-EPSTP[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "ctxtMEPO1211-KONNR[" & item_kolom & ",0]", False) Is Nothing Then
+            contractColumn = "ctxtMEPO1211-KONNR[" & item_kolom & ","
+        End If
+        If Not Session.findById(item_table & "txtMEPO1211-KTPNR[" & item_kolom & ",0]", False) Is Nothing Then
+            contract_itemColumn = "txtMEPO1211-KTPNR[" & item_kolom & ","
+        End If
+    Next item_kolom
+    ME21N_run = True
+End If
+
+Do
+    If baca = False Then
+        Read_Spreadsheet ("SAP_DATA")
+    End If
+    
+    If Session.findById(item_table & item & "[1,0]").Text = "" Then
+        baris = 0
+    ElseIf Session.findById(item_table & item & "[1,1]").Text = "" Then
+        baris = 1
+        scrollPos = 0
+    Else
+        scrollPos = scrollPos + 1
+        Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB2:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1211/tblSAPLMEGUITC_1211").verticalScrollbar.Position = scrollPos
+    End If
+    
+    plant = plantColumn & baris & "]"
+    sloc = slocColumn & baris & "]"
+    purch_req = purch_reqColumn & baris & "]"
+    purch_req_itm = purch_req_itmColumn & baris & "]"
+    PO_quantity = PO_quantityColumn & baris & "]"
+    net_price = net_priceColumn & baris & "]"
+    per = perColumn & baris & "]"
+    unit = unitColumn & baris & "]"
+    deliv_date = deliv_dateColumn & baris & "]"
+    item_cat = item_catColumn & baris & "]"
+    contract = contractColumn & baris & "]"
+    contract_item = contract_itemColumn & baris & "]"
+
+    'items
+    Session.findById(item_table & purch_req).Text = P 'purchase requisition
+    Session.findById(item_table & purch_req_itm).Text = Q 'purchase requisition item
+    Session.findById(item_table & plant).Text = F 'plant
+    Session.findById(item_table & sloc).Text = G 'storage location
+    Session.findById(item_table & PO_quantity).Text = R 'PO quantity
+    Session.findById(item_table & per).Text = T 'per
+    Session.findById(item_table & unit).Text = U 'unit
+    Session.findById(item_table & net_price).Text = S 'net price
+    Session.findById("wnd[0]").sendVKey 0   ' tekan Enter
+    
+'    If Session.findById("wnd[0]/sbar").MessageType = "E" And Session.findById("wnd[0]/sbar").Text <> "Enter Tax code" Then
+'        Err.Raise 65535  'jika error pergi ke ErrorHandler
+'    End If
+    
+    If Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015", False) Is Nothing Then
+        item_table = "wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB2:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1211/tblSAPLMEGUITC_1211/"
+    ElseIf Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0019", False) Is Nothing Then
+        item_table = "wnd[0]/usr/subSUB0:SAPLMEGUI:0019/subSUB2:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1211/tblSAPLMEGUITC_1211/"
+    End If
+    
+    If C = "NB" Then 'jika doc type NB
+        If Session.findById(item_table & contract).Text <> "" Then
+            Session.findById(item_table & contract).Text = ""
+            Session.findById(item_table & contract_item).Text = ""
+            If baris = 0 Then
+                Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB1:SAPLMEVIEWS:1100/subSUB1:SAPLMEVIEWS:4000/btnDYN_4000-BUTTON").press 'buka header
+                
+                Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0010/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT1").Select 'tekan tab delivery/invoice
+                Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0010/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT1/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1226/ctxtMEPO1226-ZTERM").Text = H 'payment terms
+                Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0010/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT1/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1226/ctxtMEPO1226-WAERS").Text = I 'currency
+                Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0010/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT1/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1226/ctxtMEPO1226-INCO1").Text = J 'incoterms 1
+                Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0010/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT1/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1226/txtMEPO1226-INCO2").Text = K 'incoterms 2
+                Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0010/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT5").Select 'tekan tab communication
+                Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0010/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT5/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1225/txtMEPOCOMM-IHREZ").Text = N 'your reference
+                Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0010/subSUB1:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1102/tabsHEADER_DETAIL/tabpTABHDT5/ssubTABSTRIPCONTROL2SUB:SAPLMEGUI:1225/txtMEPOCOMM-UNSEZ").Text = O 'our reference
+                
+                Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0010/subSUB1:SAPLMEVIEWS:1100/subSUB1:SAPLMEVIEWS:4000/btnDYN_4000-BUTTON").press 'tutup header
+                Session.findById("wnd[0]").sendVKey 0   ' tekan Enter
+            End If
+        End If
+    End If
+    If Session.findById(item_table & plant).Changeable Then
+        Session.findById(item_table & plant).Text = F 'plant
+    End If
+    If Session.findById(item_table & sloc).Changeable Then
+        Session.findById(item_table & sloc).Text = G 'storage location
+    End If
+    If Session.findById(item_table & PO_quantity).Changeable Then
+        Session.findById(item_table & PO_quantity).Text = R 'PO quantity
+    End If
+    If Session.findById(item_table & per).Changeable Then
+        Session.findById(item_table & per).Text = T 'per
+    End If
+    If Session.findById(item_table & unit).Changeable Then
+        Session.findById(item_table & unit).Text = U 'unit
+    End If
+    If Session.findById(item_table & net_price).Changeable Then
+        Session.findById(item_table & net_price).Text = S 'net price
+    End If
+            
+    'item details
+    If Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015", False) Is Nothing Then
+        itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+    ElseIf Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0019", False) Is Nothing Then
+        itm_tab = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+    End If
+    
+    If Session.ActiveWindow.Name = "wnd[2]" Then 'jika services
+        Session.findById("wnd[2]/tbar[0]/btn[0]").press 'tekan Continue
+        Session.findById("wnd[1]/usr/tabsREITER_DET/tabpSTEU/ssubSUSCREEN_DET3:SAPLMLSP:0296/ctxtESLL-MWSKZ").Text = W 'tax code
+        Session.findById("wnd[1]/tbar[0]/btn[0]").press 'tekan continue
+        itm_tab_services = "tabpTABIDT1"
+        Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_services).Select 'tekan tab services
+        
+        itm_tab = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+        Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_services & "/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1328/subSUB0:SAPLMLSP:0400/tblSAPLMLSPTC_VIEW").getAbsoluteRow(0).Selected = True 'highlight item pertama
+        Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_services & "/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1328/subSUB0:SAPLMLSP:0400/btnCONDITION").press 'tekan tombol Conditions
+        Session.findById("wnd[0]/usr/subCONDITIONS:SAPLV69A:6201/tblSAPLV69ATCTRL_KONDITIONEN/txtKOMV-KBETR[3,1]").Text = S 'price
+        Session.findById("wnd[0]/usr/subCONDITIONS:SAPLV69A:6201/tblSAPLV69ATCTRL_KONDITIONEN/ctxtRV61A-KOEIN[4,1]").Text = I 'currency
+        Session.findById("wnd[0]").sendVKey 0 'tekan tombol enter
+        Session.findById("wnd[0]/tbar[0]/btn[3]").press 'tekan tombol Back
+        Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_services & "/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1328/subSUB0:SAPLMLSP:0400/tblSAPLMLSPTC_VIEW/txtESLL-MENGE[4,0]").Text = S 'PO quantity
+    End If
+
+    If Session.findById(item_table & item_cat).Text <> "D" Then 'jika goods
+        itm_tab_invoice = "tabpTABIDT7"
+        Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_invoice).Select 'tekan tab invoice
+        
+        If Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT7/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1317", False) Is Nothing Then 'jika tab invoice tidak aktif
+            If Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015", False) Is Nothing Then
+                itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+            ElseIf Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0019", False) Is Nothing Then
+                itm_tab = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+            End If
+            Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_invoice).Select 'tekan tab invoice
+        End If
+        item_table = "wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB2:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1211/tblSAPLMEGUITC_1211/"
+        itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+        
+        tax_code = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT7/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1317/ctxtMEPO1317-MWSKZ"
+        Session.findById("wnd[0]/usr/" & tax_code).Text = W
+        
+        If Not Session.findById(item_table & net_price).Changeable Then 'jika price di item table tidak bisa diubah
+            itm_tab_conditions = "tabpTABIDT8"
+            Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_conditions).Select 'tekan tab conditions
+            
+            If Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT8/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1333", False) Is Nothing Then 'jika tab conditions tidak aktif
+                If Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015", False) Is Nothing Then
+                    itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+                ElseIf Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0019", False) Is Nothing Then
+                    itm_tab = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+                End If
+                Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_conditions).Select 'tekan tab conditions
+            End If
+            item_table = "wnd[0]/usr/subSUB0:SAPLMEGUI:0019/subSUB2:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1211/tblSAPLMEGUITC_1211/"
+            itm_tab = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+                        
+            amount = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT8/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1333/ssubSUB0:SAPLV69A:6201/tblSAPLV69ATCTRL_KONDITIONEN/txtKOMV-KBETR[3,0]"
+            crcy = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT8/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1333/ssubSUB0:SAPLV69A:6201/tblSAPLV69ATCTRL_KONDITIONEN/ctxtRV61A-KOEIN[4,0]"
+            Session.findById("wnd[0]/usr/" & amount).Text = S
+            Session.findById("wnd[0]/usr/" & crcy).Text = I
+        Else
+            Session.findById(item_table & net_price).Text = S 'net price
+        End If
+    End If
+    
+    itm_tab_customer_data = "tabpTABIDT22"
+    Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_customer_data).Select 'tekan tab customer data
+    
+    If Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT22/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1318", False) Is Nothing Then 'jika tab customer data tidak aktif
+        If Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015", False) Is Nothing Then
+            itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+        ElseIf Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0019", False) Is Nothing Then
+            itm_tab = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+        End If
+        Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_customer_data).Select 'tekan tab customer data
+    End If
+    item_table = "wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB2:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1211/tblSAPLMEGUITC_1211/"
+    itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+    
+    If AC <> "" Then 'jika Item Text terisi
+        itm_tab_texts = "tabpTABIDT15"
+        Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_texts).Select 'tekan tab texts
+        
+        If Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT15/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1329", False) Is Nothing Then 'jika tab texts tidak aktif
+            If Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015", False) Is Nothing Then
+                itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+            ElseIf Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0019", False) Is Nothing Then
+                itm_tab = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+            End If
+            Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_texts).Select 'tekan tab texts
+        End If
+        item_table = "wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB2:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1211/tblSAPLMEGUITC_1211/"
+        itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+        
+        item_text = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT15/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1329/subTEXTS:SAPLMMTE:0200/subEDITOR:SAPLMMTE:0201/cntlTEXT_EDITOR_0201/shellcont/shell"
+        Session.findById("wnd[0]/usr/" & item_text).Text = Z   'item text
+    End If
+    
+    itm_tab_delivery = "tabpTABIDT6"
+    Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_delivery).Select 'tekan tab delivery
+    
+    If Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT6/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1313", False) Is Nothing Then 'jika tab delivery tidak aktif
+        If Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015", False) Is Nothing Then
+            itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+        ElseIf Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0019", False) Is Nothing Then
+            itm_tab = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+        End If
+        Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_delivery).Select 'tekan tab delivery
+    End If
+    item_table = "wnd[0]/usr/subSUB0:SAPLMEGUI:0019/subSUB2:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1211/tblSAPLMEGUITC_1211/"
+    itm_tab = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+
+    pl_deliv_time = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT6/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1313/txtMEPO1313-PLIFZ"
+    Session.findById("wnd[0]/usr/" & pl_deliv_time).Text = X
+        
+    itm_tab_delivery_sch = "tabpTABIDT5"
+    Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_delivery_sch).Select 'tekan tab delivery schedule
+    
+    If Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/tabpTABIDT5/ssubTABSTRIPCONTROL1SUB:SAPLMEGUI:1320", False) Is Nothing Then 'jika tab delivery schedule tidak aktif
+        If Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0015", False) Is Nothing Then
+            itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+        ElseIf Not Session.findById("wnd[0]/usr/subSUB0:SAPLMEGUI:0019", False) Is Nothing Then
+            itm_tab = "subSUB0:SAPLMEGUI:0019/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+        End If
+        Session.findById("wnd[0]/usr/" & itm_tab & itm_tab_delivery_sch).Select 'tekan tab delivery schedule
+    End If
+    item_table = "wnd[0]/usr/subSUB0:SAPLMEGUI:0015/subSUB2:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1211/tblSAPLMEGUITC_1211/"
+    itm_tab = "subSUB0:SAPLMEGUI:0015/subSUB3:SAPLMEVIEWS:1100/subSUB2:SAPLMEVIEWS:1200/subSUB1:SAPLMEGUI:1301/subSUB2:SAPLMEGUI:1303/tabsITEM_DETAIL/"
+    
+    Session.findById(item_table & deliv_date).Text = V 'delivery date
+
+    frmProgress.progress_indicator_update ((lDataRow - lFirstDataRow + 1) / (lLastDataRow - lFirstDataRow + 1))
+    lDataRow = lDataRow + 1
+    baca = False
+    
+Loop While Sheets("SAP_Data").Cells(lDataRow - 1, 1).Value = Sheets("SAP_Data").Cells(lDataRow, 1).Value
+
+lDataRow = lDataRow - 1
+
+Session.findById("wnd[0]/tbar[1]/btn[39]").press    'tekan tombol 'Check
+If Session.ActiveWindow.Name = "wnd[1]" Then 'jika muncul pop up
+    If Session.findById("wnd[1]/tbar[0]/btn[17]").ToolTip = "0 Error  -  Hide   (Shift+F5)" Then ' jika tidak ada error
+        Session.findById("wnd[1]/tbar[0]/btn[0]").press ' tekan continue
+    Else ' jika ada error
+        Session.findById("wnd[1]/tbar[0]/btn[16]").press 'tekan tombol Termination
+        Session.findById("wnd[1]/tbar[0]/btn[18]").press 'tekan tombol Warning
+        Session.findById("wnd[1]/tbar[0]/btn[19]").press 'tekan tombol Information
+        sErrorPopUp = Session.findById("wnd[1]/usr/lbl[7,4]").Text
+        Err.Raise 65535 'pergi ke ErrorHandler
+    End If
+End If
+
+Session.findById("wnd[0]/tbar[0]/btn[11]").press    'tekan tombol 'Save
+If Not Session.findById("wnd[1]/usr/txtSPOP-TEXTLINE3", False) Is Nothing Then
+    If Session.findById("wnd[1]/usr/txtSPOP-TEXTLINE3").Text = "Do you want to save document or process data?" Then 'jika ada popup
+        Session.findById("wnd[1]/usr/btnSPOP-VAROPTION1").press 'tekan tombol 'Save
+    End If
+End If
+Session.findById("wnd[1]/usr/btnSPOP-OPTION2").press 'alternative approver: tekan tombol 'No'
+
+If Session.findById("wnd[0]/sbar").MessageType = "E" Then Err.Raise 65535  ' jika error pergi ke ErrorHandler
+
+' test for error and log off messages
+    Log "SAP_DATA", PosisiLog
+    Exit Sub
+
+errHandler1:
+    ErrorHandler "SAP_DATA", PosisiLog, 1
+    Exit Sub
+End Sub
+
+Private Sub Log(namaSheet As String, PosisiLog As Integer)
+    If Session.ActiveWindow.Name = "wnd[0]" Then 'jika tidak ada popup
+        sMessage = Session.findById("wnd[0]/sbar").Text 'message found
+        If sMessage = "" Then sMessage = "OK"
+        Sheets(namaSheet).Cells(lDataRow, lLastDataColumn + 2 + PosisiLog) = sMessage
+    ElseIf Session.ActiveWindow.Name = "wnd[1]" And Session.ActiveWindow.Text = "Log Off" Then 'jika muncul popup logoff
+        Session.findById("wnd[1]/usr/btnSPOP-OPTION2").press 'tekan tombol NO
+        Sheets(namaSheet).Cells(lDataRow, lLastDataColumn + 3 + PosisiLog) = "error"
+    Else
+        sMessage = Session.ActiveWindow.PopupDialogText 'message found
+        If sMessage = "" Then sMessage = "OK"
+        Sheets(namaSheet).Cells(lDataRow, lLastDataColumn + 2 + PosisiLog) = sMessage
+        Session.ActiveWindow.Close 'tutup popup
+    End If
+    Update_Status namaSheet, PosisiLog
+End Sub
+
+Private Sub Update_Status(namaSheet As String, PosisiLog As Integer)
+    Dim rngStatus As Range
+    Dim iBaris As Integer
+    
+    Set rngStatus = Sheets(namaSheet).Cells(lDataRow, lLastDataColumn + 2 + PosisiLog)
+    iBaris = rngStatus.Row
+    Do While Range("A" & iBaris - 1) = Range("A" & iBaris)
+        rngStatus.Offset(-1, 0) = rngStatus
+        iBaris = iBaris - 1
+        Set rngStatus = rngStatus.Offset(-1, 0)
+    Loop
+End Sub
+
+Private Sub ErrorHandler(namaSheet As String, PosisiLog As Integer, Optional KolomIdentifier As Integer = 0)
+    Sleep (1000)
+        'return the error message 3/4/06 - ***
+        sMessage = "Error # " & Str(Err.Number) & " was generated by " _
+        & Err.Source & ": " & Err.Description & " " & sError '& Err.HelpFile & Err.HelpContext
+        Sheets(namaSheet).Cells((lDataRow), lLastDataColumn + 3 + PosisiLog) = sMessage
+        sError = ""
+    On Error Resume Next
+    If Session.ActiveWindow.Type = "GuiModalWindow" Then 'jika muncul popup
+        Sheets(namaSheet).Cells(lDataRow, lLastDataColumn + 4 + PosisiLog) = Session.ActiveWindow.Text & "; " & Session.ActiveWindow.PopupDialogText & " " & sErrorPopUp
+        sErrorPopUp = ""
+    Else 'jika tidak ada popup
+        Sheets(namaSheet).Cells(lDataRow, lLastDataColumn + 4 + PosisiLog) = Session.ActiveWindow.Text & "; " & Session.findById("wnd[0]/sbar").Text
+    End If
+    
+    If Session.ActiveWindow.SystemFocus Is Nothing Then
+        If Session.ActiveWindow.Name = "wnd[1]" Then
+            Session.findById("wnd[1]").Close
+        Else
+            If Session.ActiveWindow.Name <> "wnd[0]" Then
+                AppActivate "Microsoft Excel"
+                MsgBox " Lost SAP focus "
+            Else
+                Session.findById("wnd[0]/tbar[0]/okcd").Text = "/n"
+                Session.findById("wnd[0]/tbar[0]/btn[0]").press
+            End If
+        End If
+    Else
+        If Session.ActiveWindow.Name = "wnd[3]" Then
+            Session.findById("wnd[3]/tbar[0]/btn[0]").press 'auto ackn error
+            Session.findById("wnd[2]/tbar[0]/btn[12]").press ' hit cancel
+            '********** test before pressing the cancel key on window [1]- *** 12/15/04
+            Sleep (1000)
+        End If
+        If Session.ActiveWindow.Name = "wnd[2]" Then
+            Session.findById("wnd[2]/tbar[0]/btn[0]").press 'auto ackn error
+            '********** test before pressing the cancel key on window [1]- *** 12/15/04
+            Sleep (1000)
+        End If
+        If Session.ActiveWindow.Name = "wnd[1]" Then
+            If Session.ActiveWindow.Children.Count > 0 Then ' 3/16/06 - ***
+                If Session.ActiveWindow.Text Like "*Information*" Then ' blow off the message
+                    Session.findById("wnd[1]/tbar[0]/btn[0]").press 'tekan continue
+                Else
+                    Session.findById("wnd[1]/tbar[0]/btn[12]").press 'tekan cancel
+                End If
+            End If
+        End If
+    End If 'Session.ActiveWindow.SystemFocus Is Nothing
+    
+    If KolomIdentifier <> 0 Then 'jika ada identifier
+        Do While Sheets(namaSheet).Cells(lDataRow + 1, KolomIdentifier) = Sheets(namaSheet).Cells(lDataRow, KolomIdentifier) 'lanjut ke identifier berikutnya
+            lDataRow = lDataRow + 1
+        Loop
+    End If
+End Sub
+
+Private Sub Prepare_spreadsheet(namaSheet As String, awalBarisData As Long)
+    Dim lUkuranArray As Long
+    
+    Sheets(namaSheet).Activate
+    lLastDataRow = Sheets(namaSheet).Cells(awalBarisData - 1, 1).End(xlDown).Row
+    lLastDataColumn = Sheets(namaSheet).Cells(awalBarisData - 1, 1).End(xlToRight).Column
+    
+    Sheets(namaSheet).Unprotect
+    Sheets(namaSheet).Cells(awalBarisData - 1, lLastDataColumn + 2) = "Status Bar"
+    Sheets(namaSheet).Cells(awalBarisData - 1, lLastDataColumn + 3) = "Error Message"
+    Sheets(namaSheet).Cells(awalBarisData - 1, lLastDataColumn + 4) = "Error Message2"
+    Sheets(namaSheet).Range(Cells(awalBarisData, lLastDataColumn + 2), Cells(awalBarisData, lLastDataColumn + 2).SpecialCells(xlCellTypeLastCell)).ClearContents
+
+    Sheets(namaSheet).Cells(awalBarisData - 1, 1).Select
+'    Sheets(namaSheet).Protect DrawingObjects:=True, Contents:=True, Scenarios:=True _
+'        , AllowFormattingCells:=True, AllowFormattingColumns:=True, _
+'        AllowFormattingRows:=True, AllowInsertingColumns:=True, AllowInsertingRows _
+'        :=True, AllowDeletingColumns:=True, AllowDeletingRows:=True, AllowSorting _
+'        :=True, AllowFiltering:=True
+    
+    lUkuranArray = Range(Selection, Selection.End(xlToRight)).Columns.Count
+    ReDim Arr(65 To lUkuranArray + 65)
+    
+    lFirstDataRow = awalBarisData
+    lDataRow = awalBarisData
+End Sub
+
+Private Sub Read_Spreadsheet(namaSheet As String)
+    A = Trim(Sheets(namaSheet).Cells(lDataRow, 1))
+    B = Trim(Sheets(namaSheet).Cells(lDataRow, 2))
+    C = Trim(Sheets(namaSheet).Cells(lDataRow, 3))
+    D = Trim(Sheets(namaSheet).Cells(lDataRow, 4))
+    E = Trim(Sheets(namaSheet).Cells(lDataRow, 5))
+    F = Trim(Sheets(namaSheet).Cells(lDataRow, 6))
+    G = Trim(Sheets(namaSheet).Cells(lDataRow, 7))
+    H = Trim(Sheets(namaSheet).Cells(lDataRow, 8))
+    I = Trim(Sheets(namaSheet).Cells(lDataRow, 9))
+    J = Trim(Sheets(namaSheet).Cells(lDataRow, 10))
+    K = Trim(Sheets(namaSheet).Cells(lDataRow, 11))
+    L = Trim(Sheets(namaSheet).Cells(lDataRow, 12))
+    M = Trim(Sheets(namaSheet).Cells(lDataRow, 13))
+    N = Trim(Sheets(namaSheet).Cells(lDataRow, 14))
+    O = Trim(Sheets(namaSheet).Cells(lDataRow, 15))
+    P = Trim(Sheets(namaSheet).Cells(lDataRow, 16))
+    Q = Trim(Sheets(namaSheet).Cells(lDataRow, 17))
+    R = Trim(Sheets(namaSheet).Cells(lDataRow, 18))
+    S = Trim(Sheets(namaSheet).Cells(lDataRow, 19))
+    T = Trim(Sheets(namaSheet).Cells(lDataRow, 20))
+    U = Trim(Sheets(namaSheet).Cells(lDataRow, 21))
+    V = Trim(Sheets(namaSheet).Cells(lDataRow, 22))
+    W = Trim(Sheets(namaSheet).Cells(lDataRow, 23))
+    X = Trim(Sheets(namaSheet).Cells(lDataRow, 24))
+    Y = Trim(Sheets(namaSheet).Cells(lDataRow, 25))
+    Z = Trim(Sheets(namaSheet).Cells(lDataRow, 26))
+    AA = Trim(Sheets(namaSheet).Cells(lDataRow, 27))
+    AB = Trim(Sheets(namaSheet).Cells(lDataRow, 28))
+    AC = Trim(Sheets(namaSheet).Cells(lDataRow, 29))
+End Sub
+
+Private Sub Activate_Scripting()
+    Dim oCheckRunningApp As Object
+    Dim iDetikKe As Integer
+    
+    'cek apakah ada aplikasi saplogon.exe yang sudah terbuka
+    'Set oCheckRunningApp = GetObject("winmgmts:"). _
+        ExecQuery("select * from win32_process where name='SAPLogon.exe'")
+    
+    'jika belum ada saplogon.exe yang terbuka jalankan Open_SAP
+    'If oCheckRunningApp.Count = 0 Then Open_SAP ("saplogon.exe")
+
+    If oGuiApplication Is Nothing Then
+        On Error Resume Next
+        iDetikKe = 1
+        Do 'lakukan yang dibawah ini sampai tidak error
+            Err.Clear
+            Set oSapGuiAuto = GetObject("SAPGUI")
+            'jika error tunggu 1 detik
+            If Err.Number <> 0 Then iDetikKe = Waiting(iDetikKe, 60, "SAP Logon tidak bisa dibuka. Error GetObject")
+        Loop Until Err.Number = 0
+        On Error GoTo 0
+
+        Set oGuiApplication = oSapGuiAuto.GetScriptingEngine
+    End If
+    
+    'buka SAP
+    If oGuiApplication.Connections.Count = 0 Then Open_SAP ("")
+    'If oGuiApplication.Connections.Count = 0 Then SAP_Open ("")
+    '/R/<SID>
+    '/G/<groupName>
+    '/M/<messageServer>
+    '/H/<serverName>
+    '/S/<messageServerName>
+
+    If oConnection Is Nothing Then
+        On Error Resume Next
+        iDetikKe = 1
+        Do 'lakukan yang dibawah ini sampai tidak error
+            Err.Clear
+            Set oConnection = oGuiApplication.Children(0)
+            'jika error tunggu 1 detik
+            If Err.Number <> 0 Then iDetikKe = Waiting(iDetikKe, 60, "SAP Logon tidak bisa dibuka. Error oGuiApplication.Children(0)")
+        Loop Until Err.Number = 0
+        On Error GoTo 0
+    End If
+    
+    If Session Is Nothing Then
+        On Error Resume Next
+        iDetikKe = 1
+        Do 'lakukan yang dibawah ini sampai tidak error
+            Err.Clear
+            Set Session = oConnection.Children(0)
+            'jika error tunggu 1 detik
+            If Err.Number <> 0 Then iDetikKe = Waiting(iDetikKe, 60, "SAP Logon tidak bisa dibuka. Error oConnection.Children(0)")
+        Loop Until Err.Number = 0
+        On Error GoTo 0
+    End If
+    
+    If Session.Info.User = "" Then SAP_Logon    ' jika belum logon maka logon dulu
+            
+    If Find_Connect_SESSION_MANAGER() = False Then 'jika tidak ada window "SESSION_MANAGER"
+        If oConnection.Children.Count = 6 Then 'jika window SAP ada 6
+            Do
+                sContinue = MsgBox("Jumlah window SAP yang terbuka sudah maksimum (6 window). " & vbCrLf & _
+                    "Silahkan tutup salah satunya kemudian tekan 'OK'." & vbCrLf & _
+                    "(Tekan 'Cancel' jika ingin mematikan Script)", _
+                    vbOKCancel + vbExclamation, "Informasi")
+                If sContinue = vbCancel Then End
+            Loop Until oConnection.Children.Count < 6
+        End If
+        
+        Set Session = oConnection.Children(0) 'memastikan koneksi ke Session tidak terputus
+        Session.CreateSession 'buka window SAP baru
+        Sleep (5000) 'tunggu 5 detik
+        Find_Connect_SESSION_MANAGER
+    End If
+End Sub
+
+Private Sub Open_SAP(NamaFileParameter)
+    Dim oWSHShell As Object
+    Dim sSAPGUIPath As String, sSID As String, sInstanceNo As String
+    
+    Set oWSHShell = VBA.CreateObject("WScript.Shell")
+    If IsObject(oWSHShell) Then
+
+        'Set the path to the SAP GUI directory
+        sSAPGUIPath = ""
+
+        'Set the SAP system ID
+        'sSID = ""
+
+        'Set the instance number of the SAP system
+        'sInstanceNo = ""
+
+        'Starts the SAP GUI
+        oWSHShell.Exec sSAPGUIPath & NamaFileParameter '& sSID & " " & sInstanceNo
+    End If
+            
+    Set oWSHShell = Nothing
+End Sub
+
+Private Function Waiting(detikKe As Integer, batas As Integer, pesan As String) As Integer
+    Sleep (5000)
+    'jika setelah detikKe 'batas' masih error maka info ke user
+    If detikKe > batas Then sContinue = MsgBox(pesan, vbExclamation, "Informasi")
+    'setelah user klik tombol Ok maka matikan macro
+    If sContinue = vbOK Then End
+    Waiting = detikKe + 1
+End Function
+
+Private Sub SAP_Logon()
+    frmLogin.Caption = "Login ke SAP (" & Session.findById("wnd[0]").Text & ")"
+    'buka form untuk input
+    frmLogin.Show
+    
+    Session.findById("wnd[0]/usr/txtRSYST-MANDT").Text = ""
+    Session.findById("wnd[0]/usr/txtRSYST-BNAME").Text = frmLogin.txtBoxUser.Text
+    Session.findById("wnd[0]/usr/pwdRSYST-BCODE").Text = frmLogin.txtBoxPassword.Text
+    Session.findById("wnd[0]/usr/txtRSYST-LANGU").Text = ""
+    Session.findById("wnd[0]").sendVKey 0
+    
+    'jika error munculkan popup
+    If Session.findById("wnd[0]/sbar").MessageType = "E" Then _
+    sContinue = MsgBox("Login error. " & vbCrLf & _
+    "Error: " & Session.findById("wnd[0]/sbar").Text & vbCrLf & _
+    "Script akan dimatikan.", vbExclamation, "Informasi")
+    'jika tombol ok ditekan maka matikan script
+    If sContinue = vbOK Then End
+    
+    'jika muncul popup maka tekan enter
+    If Session.ActiveWindow.Name = "wnd[1]" Then Session.findById("wnd[1]/tbar[0]/btn[0]").press
+End Sub
+
+Private Function Find_Connect_SESSION_MANAGER() As Boolean
+    Dim iWindowSAP As Integer
+    Dim bSesMgrAda As Boolean
+    bSesMgrAda = False
+    
+    For iWindowSAP = 1 To oConnection.Children.Count
+        'jika ada maka konek ke sesi "SESSION_MANAGER"
+        If oConnection.Children(oConnection.Children.Count - iWindowSAP).Info.transaction = "SESSION_MANAGER" Then
+            bSesMgrAda = True
+            Set Session = oConnection.Children(oConnection.Children.Count - iWindowSAP)
+            Exit For
+        End If
+    Next iWindowSAP
+    Find_Connect_SESSION_MANAGER = bSesMgrAda
+End Function
+
+Private Sub SAP_Close()
+    If oConnection.Children.Count = 1 Then 'jika SAP window hanya ada 1
+        Session.EndTransaction 'masuk ke session manager
+    Else 'jika SAP window lebih dari 1
+        Session.findById("wnd[0]").Close 'tutup SAP window yang dipakai oleh script
+        Sleep (5000)
+        Set Session = oConnection.Children(1) 'pindah koneksi ke SAP window yang lain
+    End If
+End Sub
+
+Private Sub Clean_Up()
+    Set Session = Nothing
+    Set oConnection = Nothing
+    Set oGuiApplication = Nothing
+    Set oSapGuiAuto = Nothing
+End Sub
